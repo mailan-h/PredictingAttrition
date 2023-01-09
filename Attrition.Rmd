@@ -1,0 +1,306 @@
+
+## Prepare the markdown 
+
+```{r}
+# Clear All Variables & Clear Screen
+rm(list=ls())
+cat("\014")
+```
+
+## Load, clean, and explore the data
+
+```{r}
+# Read in the Data
+setwd("D:/Desktop/Personal projects/Attrition")
+data = read.csv("Attrition.csv")
+
+#Explore the data set
+str(data)
+summary(data)
+```
+
+
+```{r}
+# Data cleaning
+data$Attrition <- ifelse(data$Attrition == "Yes", 1,0)
+data$BusinessTravel <- as.factor(data$BusinessTravel)
+data$Gender <- as.factor(data$Gender)
+data$MaritalStatus <- as.factor(data$MaritalStatus)
+data$JobRole <- as.factor(data$JobRole)
+data$JobLevel <- as.factor(data$JobLevel)
+data$Department <- as.factor(data$Department)
+data$Education <- as.factor(data$Education)
+data$EducationField <- as.factor(data$EducationField)
+
+str(data)
+```
+
+
+```{r}
+# Check correlations between independent variables
+cor(data[, unlist(lapply(data, is.numeric))])
+high_cor <- matrix(colnames(cor(data[, unlist(lapply(data, is.numeric))]))[which(abs(cor(data[, unlist(lapply(data, is.numeric))]))>0.7 & row(cor(data[, unlist(lapply(data, is.numeric))]))<col(cor(data[, unlist(lapply(data, is.numeric))])), arr.ind=TRUE)],ncol=2)
+high_cor
+
+# For pairs of variables with high correlations, remove those with lower correlations with the dependent variable
+data = subset(data, select = -c(EmployeeID, X, nhrs, YearsAtCompany, PerformanceRating))
+```
+
+## Split the dataset into training and testing sets
+
+```{r}
+set.seed(123)
+library(caTools)
+
+# Strategized split
+split = sample.split(data$Attrition, SplitRatio = 0.7)
+Train = subset(data, split==TRUE)
+Test = subset(data, split==FALSE)
+
+# Explore the data
+str(Train)
+summary(Train)
+
+```
+
+## Logistic Regression 
+
+```{r}
+# Calculate the accuracy of the baseline model
+
+# Total mistakes that baseline model makes = # people who had left in testing set as baseline model predicts no leaving for everyone
+sum(Test$Attrition)
+
+# Accuracy rate of baseline model = 1 - # mistakes /# observations
+1-sum(Test$Attrition)/nrow(Test)
+```
+
+
+```{r}
+# Run logistic regression
+glm1 = glm(Attrition ~ ., data = Train, family=binomial)
+summary(glm1)
+
+```
+
+
+```{r}
+# Evaluate the model's performance on the testing set
+
+# Making predictions with new data
+PredictedAttrition1 = predict(glm1, type="response", newdata=Test)
+
+# Creates confusion matrix with threshold of 0.5
+tbl1 = table(Test$Attrition, PredictedAttrition1 > 0.5) 
+tbl1
+
+# Accuracy of model on new data
+sum(diag(tbl1))/sum(tbl1)
+
+```
+
+
+```{r}
+# Rerun the logistic regression using only significant variables
+glm2 <- glm(Attrition ~Age + BusinessTravel + Department + EducationField +JobRole +JobLevel+ MaritalStatus +NumCompaniesWorked +TotalWorkingYears + TrainingTimesLastYear +YearsSinceLastPromotion +
+                    +YearsWithCurrManager +EnvironmentSatisfaction + JobSatisfaction +WorkLifeBalance +novertime , family=binomial(link='logit'),data=Train)
+summary(glm2)
+
+```
+```{r}
+# Evaluate the model's performance on the testing set
+
+# Making predictions with new data
+PredictedAttrition2 = predict(glm2, type="response", newdata=Test)
+
+# Creates confusion matrix with threshold of 0.5
+tbl2 = table(Test$Attrition, PredictedAttrition2 > 0.5) 
+tbl2
+
+# Accuracy of model on new data
+sum(diag(tbl2))/sum(tbl2)
+
+```
+```{r}
+# Evaluate the model's performance on the testing set using different thresholds
+
+# Creates confusion matrix with threshold of 0.4
+tbl2 = table(Test$Attrition, PredictedAttrition2 > 0.4) 
+tbl2
+# Accuracy of model on new data
+sum(diag(tbl2))/sum(tbl2)
+
+# Creates confusion matrix with threshold of 0.3
+tbl2 = table(Test$Attrition, PredictedAttrition2 > 0.3) 
+tbl2
+# Accuracy of model on new data
+sum(diag(tbl2))/sum(tbl2)
+
+# Creates confusion matrix with threshold of 0.2
+tbl2 = table(Test$Attrition, PredictedAttrition2 > 0.2) 
+tbl2
+# Accuracy of model on new data
+sum(diag(tbl2))/sum(tbl2)
+```
+
+```{r}
+# Plot the ROC Curve
+library(ROCR)
+
+ROCRpred.lr = prediction(PredictedAttrition2, Test$Attrition)
+ROCCurve.lr = performance(ROCRpred.lr, "tpr", "fpr")
+
+plot(ROCCurve.lr, colorize=TRUE, print.cutoffs.at=seq(0,1,0.1), text.adj=c(-0.2,0.7))
+
+# Calculate the area under the ROC Curve (AUC)
+as.numeric(performance(ROCRpred.lr, "auc")@y.values) # AUC value
+
+```
+
+
+## Recommendations for the company based on logistic model's predictions
+
+```{r}
+# Examine the likelihood of leaving against employees' potential (using metrics such as salary increase as an indicator of performance or job involvement level) 
+
+tapply(PredictedAttrition2, Test$PercentSalaryHike, mean)
+
+tapply(Test$Attrition, Test$PercentSalaryHike, mean)
+
+plot(PredictedAttrition2,Test$PercentSalaryHike)
+
+plot(PredictedAttrition2,Test$JobInvolvement)
+
+```
+
+
+## Classification Tree Model
+
+```{r}
+# Run classification tree model
+library(rpart)
+library(rpart.plot)
+
+Tree = rpart(Attrition ~ ., method = "class", data = Train)
+prp(Tree)
+```
+
+
+```{r}
+# Evaluate the model's performance on testing set
+
+# Use the model to predict attrition on the testing set
+treePredict <- predict(Tree, newdata=Test) # returns P(y=0) and P(y=1) for every observation in test data
+
+# Confusion matrix
+tbl3 = table(Test$Attrition, treePredict[,2] > 0.5) # threshold = 0.5
+tbl3
+
+# Accuracy of the model on the test set
+sum(diag(tbl3))/sum(tbl3)
+
+```
+
+
+```{r}
+# Evaluate the model performance on the testing set using different thresholds
+
+# Confusion matrix
+tbl3 = table(Test$Attrition, treePredict[,2] > 0.4) # threshold = 0.4
+tbl3
+# Accuracy of the model on the test set
+sum(diag(tbl3))/sum(tbl3)
+
+# Confusion matrix
+tbl3 = table(Test$Attrition, treePredict[,2] > 0.3) # threshold = 0.3
+tbl3
+# Accuracy of the model on the test set
+sum(diag(tbl3))/sum(tbl3)
+
+# Confusion matrix
+tbl3 = table(Test$Attrition, treePredict[,2] > 0.2) # threshold = 0.2
+tbl3
+# Accuracy of the model on the test set
+sum(diag(tbl3))/sum(tbl3)
+
+```
+
+```{r}
+# Plot the ROC Curve
+ROCRpred.ct = prediction(treePredict[,2], Test$Attrition)
+ROCCurve.ct = performance(ROCRpred.ct, "tpr", "fpr")
+
+plot(ROCCurve.ct, colorize=TRUE, print.cutoffs.at=seq(0,1,0.1), text.adj=c(-0.2,0.7))
+
+# Calculate the area under the ROC Curve (AUC)
+as.numeric(performance(ROCRpred.ct, "auc")@y.values) # AUC value
+```
+
+
+## Random Forest Model
+
+```{r}
+# The following commands convert the data type of the 0's and 1's from integer to categorical
+Train$Attrition = as.factor(Train$Attrition)
+Test$Attrition = as.factor(Test$Attrition)
+
+# Run random forest model
+library(randomForest)
+Forest = randomForest(Attrition ~ . , data = Train, ntree = 500, nodesize =5)
+
+# Evaluate the model performance on the testing set 
+PredictForest = predict(Forest, newdata=Test, type = "prob") # returns P(y=0) and P(y=1) for every observation
+
+# Confusion matrix
+tbl4 = table(Test$Attrition, PredictForest[,2] > 0.5) # assume threshold = 0.5
+tbl4
+# Accuracy
+sum(diag(tbl4))/sum(tbl4)
+
+```
+
+
+```{r}
+# Evaluate the model performance on the testing set using different thresholds
+
+# Confusion matrix
+tbl4 = table(Test$Attrition, PredictForest[,2] > 0.4)
+tbl4
+# Accuracy
+sum(diag(tbl4))/sum(tbl4)
+
+# Confusion matrix
+tbl4 = table(Test$Attrition, PredictForest[,2] > 0.3)
+tbl4
+# Accuracy
+sum(diag(tbl4))/sum(tbl4)
+
+# Confusion matrix
+tbl4 = table(Test$Attrition, PredictForest[,2] > 0.2)
+tbl4
+# Accuracy
+sum(diag(tbl4))/sum(tbl4)
+```
+
+
+```{r}
+# Plot the ROC Curve
+ROCRpred.rf = prediction(PredictForest[,2], Test$Attrition)
+ROCCurve.rf = performance(ROCRpred.rf, "tpr", "fpr")
+
+plot(ROCCurve.rf, colorize=TRUE, print.cutoffs.at=seq(0,1,0.1), text.adj=c(-0.2,0.7))
+
+# Calculate the area under the ROC Curve (AUC)
+as.numeric(performance(ROCRpred.rf, "auc")@y.values) # AUC value
+```
+
+
+```{r}
+# Comparing three models
+
+plot(ROCCurve.lr, colorize=TRUE, print.cutoffs.at=seq(0,1,0.1), text.adj=c(-0.2,0.7))
+plot(ROCCurve.ct, colorize=TRUE, print.cutoffs.at=seq(0,1,0.1), text.adj=c(-0.2,0.7), add = TRUE)
+plot(ROCCurve.rf, colorize=TRUE, print.cutoffs.at=seq(0,1,0.1), text.adj=c(-0.2,0.7), add = TRUE)
+
+```
+ 
